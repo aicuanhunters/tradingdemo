@@ -1561,9 +1561,9 @@
   </div>
 
   <div class="demo-section">
-    <span class="demo-section-label">Value</span>
+    <span class="demo-section-label">Margin</span>
     <span style="font-size:11px;font-weight:800;color:var(--accent-light);font-variant-numeric:tabular-nums;text-shadow:0 0 8px rgba(14,203,129,0.4);">
-      $<span id="demoLotValue">10.00</span>
+      $<span id="demoLotValue">0.00</span>
     </span>
   </div>
 
@@ -2392,23 +2392,27 @@ let currentInterval = '15m';
 let lastPrice = null;
 let ws = null;
 let wsTrades = null;
-let obWs = null;
 let pricePollInterval = null;
 let multiPricePollInterval = null;
 let isMobile = () => window.innerWidth <= 900;
 
-/* ═══ DEMO TRADING (LOT-BASED, MULTI ENTRY) ═══ */
-const DEMO_KEY = 'hunters_demo_v5';
-const LOT_VALUE_PER_PAIR = {
-  'BTCUSDT': 1000,
-  'ETHUSDT': 1000,
-  'SOLUSDT': 1000,
-  'BNBUSDT': 1000,
-  'XRPUSDT': 1000,
-  'XAUTUSDT': 1000,
-};
-const DEFAULT_LOT_VALUE = 1000;
+/* ═══════════════════════════════════════════
+   DEMO TRADING — FOREX/CFD STYLE
+   Contract Size + Leverage 1:2000
+   ═══════════════════════════════════════════ */
+const DEMO_KEY = 'hunters_demo_v6';
 const MIN_LOT = 0.01;
+const DEFAULT_LEVERAGE = 2000;
+
+const CONTRACT_SIZE = {
+  'BTCUSDT': 1,
+  'ETHUSDT': 1,
+  'SOLUSDT': 1,
+  'BNBUSDT': 1,
+  'XRPUSDT': 1000,
+  'XAUTUSDT': 100,
+};
+const DEFAULT_CONTRACT_SIZE = 1;
 
 let demoState = JSON.parse(localStorage.getItem(DEMO_KEY) || 'null') || {
   balance: 10000,
@@ -2425,10 +2429,6 @@ Object.keys(demoState.positions).forEach(sym => {
   if (!Array.isArray(v)) {
     if (v && typeof v === 'object') {
       v.id = v.id || Date.now() + Math.random();
-      if (v.lot === undefined && v.margin !== undefined) {
-        const lotValue = LOT_VALUE_PER_PAIR[sym] || DEFAULT_LOT_VALUE;
-        v.lot = v.margin / lotValue;
-      }
       demoState.positions[sym] = [v];
     } else {
       delete demoState.positions[sym];
@@ -2457,11 +2457,15 @@ function fmtMoney(n) {
 
 function calcPnl(pos, cp) {
   const diff = pos.side === 'long' ? (cp - pos.entry) : (pos.entry - cp);
-  return diff * pos.qty;
+  return diff * pos.lot * (pos.contractSize || 1);
 }
 
-function getLotValue(pair) {
-  return LOT_VALUE_PER_PAIR[pair] || DEFAULT_LOT_VALUE;
+function getContractSize(pair) {
+  return CONTRACT_SIZE[pair] || DEFAULT_CONTRACT_SIZE;
+}
+
+function getLeverage(pair) {
+  return DEFAULT_LEVERAGE;
 }
 
 function getCurrentLot() {
@@ -2481,7 +2485,6 @@ function getAllPositions() {
   return all;
 }
 
-/* ═══ ENTRY VISUAL DI CHART (multi entry) ═══ */
 function showEntryOnChart() {
   clearEntryOnChart();
   if (rawCandles.length === 0) return;
@@ -2698,9 +2701,12 @@ function updateLotValueDisplay() {
   const lotEl = document.getElementById('demoLotValue');
   if (!lotEl) return;
   const lot = getCurrentLot();
-  const lotValue = getLotValue(currentPair);
-  const value = lot * lotValue;
-  lotEl.textContent = value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const contractSize = getContractSize(currentPair);
+  const leverage = getLeverage(currentPair);
+  const price = lastPrice || 0;
+  const notional = lot * contractSize * price;
+  const margin = notional / leverage;
+  lotEl.textContent = margin.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function updatePnlDisplay() {
@@ -2752,8 +2758,9 @@ function openPosition(side) {
     alert('Lot minimum adalah ' + MIN_LOT.toFixed(2));
     return;
   }
-  const lotValue = getLotValue(currentPair);
-  const margin = lot * lotValue;
+
+  const contractSize = getContractSize(currentPair);
+  const leverage = getLeverage(currentPair);
   const entryPrice = lastPrice;
 
   if (!entryPrice) {
@@ -2761,14 +2768,15 @@ function openPosition(side) {
     return;
   }
 
+  const notional = lot * contractSize * entryPrice;
+  const margin = notional / leverage;
+
   if (margin > demoState.balance) {
     alert('Saldo tidak cukup. Margin dibutuhkan: ' + fmtMoney(margin) + ' | Saldo: ' + fmtMoney(demoState.balance));
     return;
   }
 
-  const qty = margin / entryPrice;
   demoState.lot = lot;
-
   demoState.balance -= margin;
 
   if (!demoState.positions[currentPair]) {
@@ -2781,9 +2789,10 @@ function openPosition(side) {
     side,
     entry: entryPrice,
     lot,
-    lotValue,
+    contractSize,
+    leverage,
+    notional,
     margin,
-    qty,
     markPrice: entryPrice,
     time: Date.now(),
   };
@@ -2813,8 +2822,10 @@ function closePositionById(symbol, id) {
     side: pos.side,
     entry: pos.entry,
     exit: exitPrice,
-    qty: pos.qty,
     lot: pos.lot,
+    contractSize: pos.contractSize,
+    leverage: pos.leverage,
+    notional: pos.notional,
     margin: pos.margin,
     pnl,
     time: Date.now(),
@@ -2896,7 +2907,7 @@ function renderPositions() {
                 <span class="arrow">${arrow}</span>
                 <span>${sideLabel}</span>
               </div>
-              <span class="position-symbol-label">${pos.lot.toFixed(2)} LOT • $${(pos.margin).toLocaleString('en-US', {maximumFractionDigits:2})}</span>
+              <span class="position-symbol-label">${pos.lot.toFixed(2)} LOT • ${pos.leverage || 2000}x</span>
             </div>
             <div style="display:flex;align-items:center;gap:8px;">
               <span class="position-pnl ${pnl >= 0 ? 'positive' : 'negative'}">
@@ -2913,15 +2924,15 @@ function renderPositions() {
             <span class="value mono position-mark-price-value">$${refPrice.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
           </div>
           <div class="position-row">
-            <span>Qty</span>
-            <span class="value mono">${pos.qty.toFixed(6)}</span>
-          </div>
-          <div class="position-row">
             <span>Lot</span>
             <span class="value">${pos.lot.toFixed(2)} LOT</span>
           </div>
           <div class="position-row">
-            <span>Margin</span>
+            <span>Notional</span>
+            <span class="value">${fmtMoney(pos.notional || 0)}</span>
+          </div>
+          <div class="position-row">
+            <span>Margin (1:${pos.leverage || 2000})</span>
             <span class="value">${fmtMoney(pos.margin)}</span>
           </div>
           <div class="position-row">
@@ -3051,8 +3062,12 @@ function renderHistory() {
           <span class="value mono">$${(h.exit || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
         </div>
         <div class="history-row">
-          <span>Qty</span>
-          <span class="value mono">${(h.qty || 0).toFixed(6)}</span>
+          <span>Notional</span>
+          <span class="value mono">${fmtMoney(h.notional || 0)}</span>
+        </div>
+        <div class="history-row">
+          <span>Margin</span>
+          <span class="value mono">${fmtMoney(h.margin || 0)}</span>
         </div>
         <div class="history-time">${timeStr}</div>
       </div>

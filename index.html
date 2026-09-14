@@ -729,6 +729,7 @@
     display: flex;
     overflow: hidden;
     position: relative;
+    isolation: isolate;
   }
 
   /* ═══════════ WATCHLIST ═══════════ */
@@ -743,6 +744,7 @@
     flex-shrink: 0;
     position: relative;
     opacity: 1;
+    z-index: 2;
   }
   .watchlist.hidden { width: 0; border-right: none; opacity: 0; pointer-events: none; }
   .watchlist-edge-toggle {
@@ -837,12 +839,38 @@
   .watchlist-empty { padding: 20px 14px; text-align: center; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
 
   /* ═══════════ CHART ═══════════ */
-  .chart-area { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
-  #chart { flex: 1; min-height: 0; position: relative; }
+  .chart-area {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    z-index: 1;
+    isolation: isolate;
+  }
+  #chart {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    overflow: hidden;
+  }
   #chart a#tv-attr-logo,
   #chart a[href*="tradingview.com"],
   #chart .tv-attr-logo,
   #chart > div > a[target="_blank"] { display: none !important; visibility: hidden !important; opacity: 0 !important; }
+
+  /* Paksa toolbar Drawing Tools tetap di dalam #chart, tidak bocor ke viewport */
+  #chart > div { overflow: hidden !important; }
+  #chart > div > div[style*="position: fixed"],
+  #chart > div > div[style*="position:fixed"] {
+    position: absolute !important;
+  }
+  /* Sembunyikan toolbar kalau bocor ke body */
+  body > div[style*="position: fixed"][style*="z-index"]:not(#mobileOverlay):not(.indicator-panel) {
+    pointer-events: auto;
+  }
+
   #status {
     position: absolute;
     top: 50%; left: 50%;
@@ -882,6 +910,8 @@
     flex-shrink: 0;
     transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s;
     overflow: hidden;
+    position: relative;
+    z-index: 2;
   }
   .side-panel.collapsed { width: 0; border-left: none; opacity: 0; }
 
@@ -1754,7 +1784,7 @@ try {
     color: '#0ecb81',
     lineWidth: 2,
     showEndpoints: true,
-    toolBoxOffset: { x: 10, y: 80 },
+    toolBoxOffset: { x: 10, y: 10 },
   });
   candleSeries.attachPrimitive(drawingTools);
   console.log('✅ Drawing Tools aktif');
